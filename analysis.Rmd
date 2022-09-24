@@ -1,0 +1,191 @@
+---
+title: "gunControl_Analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(igraph)
+library(tm)
+library(SnowballC)
+library(sqldf)
+library(syuzhet)
+library(ggplot2)
+library(dplyr)
+library(usmap)
+library(ggplot2)
+library(maps)
+```
+
+## Setup table
+
+```{r cars}
+dir = "/Users/MeijiTenno/Documents/Scuola/3^anno/Social Network Analisys/GunControl"
+setwd(dir)
+
+load("tabelle/finalDF.RData")
+ts <- data.frame(finalDF , stringsAsFactors = FALSE)
+
+coord_polarity2<-read.csv("tabelle/coord_polarity2.csv", header=T, as.is=T, sep = ",", stringsAsFactors = FALSE)
+
+
+```
+
+## Bipartite Plots
+
+```{r pressure, echo=FALSE}
+edges = data.frame("from" = ts$status_id, "to" = ts$reply_to_user_id, 
+                   stringsAsFactors = F )
+g <- graph.data.frame(edges, directed = F)
+V(g)$type <- bipartite_mapping(g)$type
+# Faccio un po di cose per disegnare la bipartita
+V(g)$color <- ifelse(V(g)$type, "lightblue", "salmon")
+#V(g)$shape <- ifelse(V(g)$type, "circle", "square")
+E(g)$color <- "grey"
+l <- layout_as_bipartite(g)
+
+plot(g, vertex.label = NA, 
+     vertex.size=6,
+     edge.width=0.2,
+     edges.size = 0.1,
+     layout = l)
+
+
+```
+
+
+
+## Projection on reply and Community Detection Plots
+
+```{r pressure, echo=FALSE}
+sample_status_id = sample(ts$status_id, 1000, replace = F)
+sample_ts= ts[ts$status_id %in% sample_status_id,]
+edges = data.frame("from" = sample_ts$status_id,
+                   "to" = sample_ts$reply_to_user_id, stringsAsFactors = F )
+
+g <- graph.data.frame(edges, directed = F)
+V(g)$type <- V(g)$name %in% edges[,2]
+g_comm <- g
+g = g_comm
+
+bipartite_matrix <- as_incidence_matrix(g_comm)
+tweets_matrix <- tcrossprod(bipartite_matrix)
+diag(tweets_matrix) <- 0
+g_tweets_r = graph_from_adjacency_matrix(tweets_matrix, 
+                                        mode = "undirected", 
+                                        weighted = TRUE)
+g_tweets_r = simplify(g_tweets_r)
+
+# plot proiezione sui video
+V(g_tweets_r)$size <- degree(g_tweets_r)
+V(g_tweets_r)$label.cex <- degree(g_tweets_r) * 0.2
+E(g_tweets_r)$color <- "blue"
+
+pdf("proj_video.pdf")
+plot(g_tweets_r, vertex.label.cex = 0.2, 
+     #vertex.label.color = "blue",
+     vertex.label = NA,
+     edge.width=0.5,
+     edges.size = 0.2,
+     edge.lty = 2,
+     vertex.size = 1.2,
+     edge.curved = TRUE,
+     layout=layout.circle(g_tweets_r)
+)
+dev.off()
+
+
+cl_fg = cluster_fast_greedy(g_tweets_r)
+
+pdf("comm_det.pdf")
+#metodo originale
+plot(g_tweets_r, 
+     #vertex.color=membership(cl_fg),
+     vertex.label = NA,
+     vertex.size = 3,
+     edge.color=membership(cl_fg),
+     edge.curved = TRUE,
+     edge.width = 1,
+     layout=layout.circle(g_tweets_r)
+)
+dev.off()
+
+
+```
+
+
+## setup Sentiment vs something Plots
+
+```{r pressure, echo=FALSE}
+coord_polarity <- coord_polarity2
+coord_polarity <- coord_polarity[- c(2, 11),]
+new_cp <- data.frame(coord_polarity$stato, coord_polarity$control)
+names(new_cp) <- c("state", "control")
+
+us_states <- map_data("state")
+
+```
+
+## Sentiments & laws  Plots
+
+```{r pressure, echo=FALSE}
+new_cp$region <- tolower(new_cp$state)
+states <- left_join(us_states, new_cp)
+
+
+ggplot(data = states,aes(x = long, y = lat)) +
+  geom_polygon(color = "gray90", size = 0.2, aes(group = group, fill = control)) +
+  scale_fill_continuous(low="lightyellow1", high="slategrey", name = "restrittività delle leggi", label = scales::comma) +
+  geom_point(aes(lon, latC+0.7, size = negGunColumn*1000), coord_polarity, color = "red")+
+  geom_point(aes(lon, latP-0.7, size = proGunColumn*1000), coord_polarity, color="green")
+```
+
+## Sentiments & mass shootings Plots
+
+```{r pressure, echo=FALSE}
+shootings <- read.csv("tabelle/ShootingTab.csv", header=T, as.is=T, sep = ";", stringsAsFactors = FALSE)
+shootings$region <- tolower(shootings$state)
+states <- left_join(us_states, shootings)
+head(states)
+
+ggplot(data = states,aes(x = long, y = lat)) +
+  geom_polygon(color = "black", size = 0.2, aes(group = group, fill = shoot)) +
+  scale_fill_continuous(low="white", high="navyblue", name = "numero di sparatorie", label = scales::comma) +
+  geom_point(aes(lon, latC+0.7, size = negGunColumn*1000), coord_polarity, color = "red")+
+  geom_point(aes(lon, latP-0.7, size = proGunColumn*1000), coord_polarity, color="green")
+```
+
+## General Sentiment Plots
+
+```{r pressure, echo=FALSE}
+load("tabelle/td_em.RData")
+
+ggplot(td_em, aes(x = sentiment, y = count, fill = sentiment)) +
+        geom_bar(stat = "identity") +
+        labs(x = "emotion") +
+        theme(axis.text.x=element_text(angle=45, hjust=1), legend.title = element_blank())
+
+```
+
+## General polarity Plots
+
+```{r pressure, echo=FALSE}
+load("tabelle/td_pol.RData")
+
+ggplot(td_pol, aes(x = sentiment, y = count, fill = sentiment)) +
+  geom_bar(stat = "identity", width = 0.5) +
+  labs(x = "polarity") +
+  theme(axis.text.x=element_text(angle=45, hjust=1), legend.title = element_blank())
+
+```
+
+
+
+
+
+
+
+
+
+
